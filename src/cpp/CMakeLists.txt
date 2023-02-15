@@ -4,33 +4,6 @@
 # @author Jan Engels, DESY
 #################################
 
-SET( LCIO_CPPFORT_SRCS
-  ./src/CPPFORT/HEPEVT.cc
-  ./src/CPPFORT/lccah.cc
-  ./src/CPPFORT/lcclu.cc
-  ./src/CPPFORT/lccol.cc
-  ./src/CPPFORT/lcevt.cc
-  ./src/CPPFORT/lcgob.cc
-  ./src/CPPFORT/lciof77apiext.cc
-  ./src/CPPFORT/lcmcp.cc
-  ./src/CPPFORT/lcobv.cc
-  ./src/CPPFORT/lcpid.cc
-  ./src/CPPFORT/lcrcp.cc
-  ./src/CPPFORT/lcrdr.cc
-  ./src/CPPFORT/lcrdrrep.cc
-  ./src/CPPFORT/lcrel.cc
-  ./src/CPPFORT/lcrhd.cc
-  ./src/CPPFORT/lcrnv.cc
-  ./src/CPPFORT/lcsch.cc
-  ./src/CPPFORT/lcsth.cc
-  ./src/CPPFORT/lctph.cc
-  ./src/CPPFORT/lctrh.cc
-  ./src/CPPFORT/lctrk.cc
-  ./src/CPPFORT/lcvec.cc
-  ./src/CPPFORT/lcvtx.cc
-  ./src/CPPFORT/lcwrt.cc
-)
-
 SET( LCIO_IMPL_SRCS
   ./src/IMPL/AccessChecked.cc
   ./src/IMPL/CalorimeterHitImpl.cc
@@ -120,7 +93,10 @@ SET( LCIO_UTIL_SRCS
   ./src/UTIL/PIDHandler.cc
   ./src/UTIL/ILDConf.cc
   ./src/UTIL/ProcessFlag.cc
-)
+  ./src/UTIL/LCCollectionTools.cc
+  ./src/UTIL/ReconstructedParticleTools.cc
+  ./src/UTIL/CheckCollections.cc
+  )
 
 SET( LCIO_MT_SRCS
   ./src/MT/LCReader.cc
@@ -227,7 +203,6 @@ if( LCIO_GENERATE_HEADERS )
   SET( IO_AID_HEADERS_DEP_LIST ${AID_HEADERS_LIST};${CXX_HEADERS_LIST} )
 
   # make source files depend on generated header files + aid files
-  SET_SOURCE_FILES_PROPERTIES( ${LCIO_CPPFORT_SRCS} PROPERTIES OBJECT_DEPENDS "${EVENT_AID_HEADERS_DEP_LIST};${IO_AID_HEADERS_DEP_LIST}" )
   SET_SOURCE_FILES_PROPERTIES( ${LCIO_IMPL_SRCS} PROPERTIES OBJECT_DEPENDS "${EVENT_AID_HEADERS_DEP_LIST}" )
   SET_SOURCE_FILES_PROPERTIES( ${LCIO_IOIMPL_SRCS} PROPERTIES OBJECT_DEPENDS "${IO_AID_HEADERS_DEP_LIST}" )
   # ----------------------------------------------------------------------------
@@ -249,15 +224,6 @@ endif()
 # -------- compiler definitions ----------------------------------------------
 #ADD_DEFINITIONS( "-Wall -ansi -pedantic" )
 #ADD_DEFINITIONS( "-Wno-long-long -fno-strict-aliasing" )
-
-#---- special flags for cfortran code : --------
-SET_SOURCE_FILES_PROPERTIES(
-  ${LCIO_CPPFORT_SRCS} PROPERTIES
-  COMPILE_FLAGS "-Df2cFortran -Wno-unused"
-)
-# ----------------------------------------------------------------------------
-
-
 
 
 # -------- include directories -----------------------------------------------
@@ -282,9 +248,7 @@ INSTALL_DIRECTORY( ${LCIO_AID_HEADERS_OUTPUT_DIR}/ DESTINATION include )
 
 
 
-# ------- libraries lcio + lcioF77 -------------------------------------------
-ADD_LIBRARY( lcioF77 STATIC ${LCIO_CPPFORT_SRCS} )
-INSTALL( TARGETS lcioF77 DESTINATION lib )
+# ------- libraries lcio -------------------------------------------
 
 ADD_SHARED_LIBRARY( lcio
   ${LCIO_IMPL_SRCS}
@@ -293,13 +257,12 @@ ADD_SHARED_LIBRARY( lcio
   ${LCIO_SIO_SRCS}
   ${LCIO_MT_SRCS}
 )
-INSTALL_SHARED_LIBRARY( lcio DESTINATION lib )
+INSTALL_SHARED_LIBRARY( lcio DESTINATION ${CMAKE_INSTALL_LIBDIR} )
 
 TARGET_LINK_LIBRARIES( lcio ${CMAKE_THREAD_LIBS_INIT} )
 TARGET_LINK_LIBRARIES( lcio ${SIO_LIBRARIES} )
-TARGET_LINK_LIBRARIES( lcioF77 lcio )
 
-ADD_CUSTOM_TARGET( lib DEPENDS lcio lcioF77 )
+ADD_CUSTOM_TARGET( lib DEPENDS lcio )
 # ----------------------------------------------------------------------------
 
 
@@ -416,8 +379,8 @@ IF( BUILD_ROOTDICT )
       ADD_CUSTOM_TARGET(dylib2so
 	COMMAND ${CMAKE_COMMAND} -E create_symlink liblcio.dylib liblcio.so
 	COMMAND ${CMAKE_COMMAND} -E create_symlink liblcioDict.dylib liblcioDict.so
-	WORKING_DIRECTORY  ${CMAKE_INSTALL_PREFIX}/lib
-	DEPENDS ${CMAKE_INSTALL_PREFIX}/lib/liblcio.dylib )
+	WORKING_DIRECTORY  ${CMAKE_INSTALL_LIBDIR}
+	DEPENDS ${CMAKE_INSTALL_LIBDIR}/liblcio.dylib )
 
       INSTALL( CODE "EXECUTE_PROCESS( COMMAND ${CMAKE_BUILD_TOOL} dylib2so)" )
 
@@ -426,7 +389,7 @@ IF( BUILD_ROOTDICT )
 
     ADD_CUSTOM_TARGET( dict DEPENDS lcioDict )
 
-    INSTALL_SHARED_LIBRARY( lcioDict DESTINATION lib )
+    INSTALL_SHARED_LIBRARY( lcioDict DESTINATION ${CMAKE_INSTALL_LIBDIR} )
 
     #fg: for root6 we also need to install the pcm files ...
     SET( ROOT_DICT_PCM_FILES
@@ -440,7 +403,26 @@ IF( BUILD_ROOTDICT )
 
     message( STATUS "{ROOT_DICT_OUTPUT_DIR} : ${ROOT_DICT_OUTPUT_DIR}  - {ROOT_DICT_PCM_FILES}: ${ROOT_DICT_PCM_FILES} " )
 
-    INSTALL(FILES  ${ROOT_DICT_PCM_FILES} DESTINATION lib)
+    INSTALL(FILES  ${ROOT_DICT_PCM_FILES} DESTINATION ${CMAKE_INSTALL_LIBDIR})
+
+    # We need to install some headers which are necessary for the python
+    # bindings, even though these are essentially internal implementation
+    # headers only and should not be publicly reachable. However, if we do not
+    # install these then, the ROOT generated python bindings will not work if
+    # the LCIO sources are removed after the installation. See #106
+    INSTALL(FILES
+      ${CMAKE_CURRENT_LIST_DIR}/include/IOIMPL/LCEventLazyImpl.h
+      DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/IOIMPL
+    )
+    INSTALL(FILES
+      ${CMAKE_CURRENT_LIST_DIR}/include/SIO/SIOHandlerMgr.h
+      ${CMAKE_CURRENT_LIST_DIR}/include/SIO/SIOObjectHandler.h
+      DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/SIO
+    )
+
+    INSTALL(DIRECTORY
+      ${CMAKE_CURRENT_LIST_DIR}/include/pre-generated
+      DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 
 ENDIF()
 # ----------------------------------------------------------------------------
@@ -467,6 +449,8 @@ ADD_LCIO_EXAMPLE( copyfix )
 ADD_LCIO_EXAMPLE( stdhepjob )
 ADD_LCIO_EXAMPLE( stdhepjob_new )
 ADD_LCIO_EXAMPLE( addRandomAccess )
+ADD_LCIO_EXAMPLE( check_missing_cols )
+ADD_LCIO_EXAMPLE( patch_missing_cols )
 ADD_LCIO_EXAMPLE( lcio_event_counter )
 ADD_LCIO_EXAMPLE( lcio_check_col_elements )
 ADD_LCIO_EXAMPLE( lcio_split_file ) 
